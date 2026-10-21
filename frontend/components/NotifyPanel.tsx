@@ -21,6 +21,7 @@ export function NotifyPanel({ notify, onSaved }: { notify: NodeSettings["notify"
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const defaultTemplate = t("notify.default_template");
   const canTest = !!(token.trim() || notify.api_key.set);
+  const notReady = !notify.enabled ? "notify.not_ready.off" : !notify.api_key.set ? "notify.not_ready.token" : people.length === 0 ? "notify.not_ready.people" : null;
 
   async function run(key: string, fn: () => Promise<string | void>) {
     setBusy(key);
@@ -37,7 +38,14 @@ export function NotifyPanel({ notify, onSaved }: { notify: NodeSettings["notify"
 
   const save = () =>
     run("save", async () => {
-      await saveSettings({ notify: { enabled, template: template.trim() || defaultTemplate, ...(token.trim() ? { api_key: token.trim() } : {}) } });
+      await saveSettings({
+        notify: {
+          enabled,
+          template: template.trim() || defaultTemplate,
+          failed_text: t("notify.failed_text"),
+          ...(token.trim() ? { api_key: token.trim() } : {}),
+        },
+      });
       setToken("");
       await onSaved();
       return t("rules.saved");
@@ -169,6 +177,9 @@ export function NotifyPanel({ notify, onSaved }: { notify: NodeSettings["notify"
         <p className="mt-1 text-xs text-accent-400">{t("notify.to_hint")}</p>
       </div>
 
+      {notReady && (
+        <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 ring-1 ring-inset ring-amber-200">{t(notReady)}</p>
+      )}
       <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
         {note && (
           <span className={`flex items-center gap-1 text-sm ${note.ok ? "text-emerald-700" : "text-rose-700"}`}>

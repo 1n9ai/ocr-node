@@ -960,8 +960,8 @@ def save_settings(body: dict = Body(...)):
             _apply_secret(new["notify"], k, v)
         elif k == "enabled":
             new["notify"]["enabled"] = bool(v)
-        elif k == "template":
-            new["notify"]["template"] = str(v or "").strip()[:500]
+        elif k in ("template", "failed_text"):
+            new["notify"][k] = str(v or "").strip()[:500]
     if (reason := _insecure_central_reason(new["central"].get("url", "").rstrip("/"))):
         raise err(400, "central_insecure", reason)
     _write_settings(new)
@@ -1253,6 +1253,13 @@ def admin_status():
         "counts": {"docs": len(db_all("docs")), "rules": len(db_all("rules"))},
         "usage": get_usage(),
     }
+
+
+@app.get("/api/admin/license/key")
+def license_key_reveal():
+    """license key ที่เครื่องนี้ใช้อยู่ (ต้องล็อกอิน) — ให้ผู้ใช้เก็บไว้หรือนำไปใส่ในแอป 1n9 ตัวอื่น"""
+    _, lic = _central(check=False)
+    return {"license_key": lic}
 
 
 @app.post("/api/admin/license/claim")
@@ -1623,39 +1630,76 @@ def _notify_ready(n: dict) -> bool:
     return bool(n.get("enabled") and n.get("api_key") and n.get("recipients"))
 
 
-def _push_all(token: str, recipients: list[dict], text: str) -> tuple[int, int]:
-    """ส่งให้ทุกคนในรายชื่อ — คืน (สำเร็จ, ล้มเหลว) ไม่หยุดกลางทางเมื่อบางคนส่งไม่ได้"""
+def _push_all(token: str, recipients: list[dict], text: str) -> tuple[int, int, int]:
+    """ส่งให้ทุกคนในรายชื่อ — คืน (สำเร็จ, ล้มเหลว, สถานะ HTTP แรกที่ล้มเหลว หรือ 0 = ติดต่อ LINE ไม่ได้)
+    ไม่หยุดกลางทางเมื่อบางคนส่งไม่ได้"""
     ok = failed = 0
+    first_status = 0
     for r in recipients:
         try:
             _push_line(token, r["id"], text)
             ok += 1
-        except Exception:
+        except Exception as e:
             failed += 1
-    return ok, failed
+            if not first_status:
+                first_status = int(getattr(e, "line_status", 0) or 0)
+    return ok, failed, first_status
+
+
+class _LineRejected(Exception):
+    def __init__(self, status: int):
+        super().__init__(f"LINE HTTP {status}")
+        self.line_status = status
 
 
 def _push_line(token: str, to: str, text: str) -> None:
+    token = token.strip()
+    if token.lower().startswith("bearer "):
+        token = token[7:].strip()
     resp = httpx.post(f"{LINE_API}/v2/bot/message/push", timeout=15,
                       headers={"Authorization": f"Bearer {token}"},
                       json={"to": to, "messages": [{"type": "text", "text": text[:4800]}]})
     if resp.status_code >= 400:
-        raise err(502, "notify_failed", "LINE rejected the message", line_status=resp.status_code)
+        raise _LineRejected(resp.status_code)
+
+
+def _notify_error(status: int) -> HTTPException:
+    if status in (401, 403):
+        return err(502, "notify_token_invalid", "LINE did not accept the channel access token", line_status=status)
+    if status == 429:
+        return err(502, "notify_quota", "LINE refused: too many messages or the monthly message limit is used up", line_status=status)
+    if status == 400:
+        return err(502, "notify_receiver", "LINE could not deliver to this receiver", line_status=status)
+    if not status:
+        return err(502, "notify_unreachable", "Cannot reach LINE")
+    return err(502, "notify_failed", "LINE did not accept the message", line_status=status)
 
 
 def _notify_text(n: dict, doc: dict) -> str:
     labels = [i.get("label") or i["code"] for i in (doc.get("check") or {}).get("issues", [])]
+    if not labels:
+        labels = [(n.get("failed_text") or "").strip() or "unreadable"]
     template = (n.get("template") or "").strip() or "{file}: {issues}"
     return (template.replace("{file}", doc.get("filename", "")).replace("{count}", str(len(labels)))
             .replace("{issues}", ", ".join(labels)))
 
 
 def _notify_doc(doc: dict) -> None:
+    """ส่งแจ้งเตือนแบบไม่ขวางการอัปโหลด แล้วบันทึกผล (sent / partial / failed) ลงเอกสารทีหลัง"""
     n = load_settings().get("notify") or {}
     if not _notify_ready(n) or (doc["status"] != "failed" and (doc.get("check") or {}).get("ok")):
         return
-    ok, failed = _push_all(n["api_key"], n["recipients"], _notify_text(n, doc))
-    doc["notified"] = "sent" if ok and not failed else ("partial" if ok else "failed")
+    text = _notify_text(n, doc)
+
+    def run() -> None:
+        ok, failed, _ = _push_all(n["api_key"], n["recipients"], text)
+        with _db_lock:
+            current = db_get("docs", doc["id"])
+            if current is not None:
+                current["notified"] = "sent" if ok and not failed else ("partial" if ok else "failed")
+                db_put("docs", doc["id"], current)
+
+    threading.Thread(target=run, name="line-notify", daemon=True).start()
 
 
 # ── กฎตรวจ ───────────────────────────────────────────
@@ -1723,8 +1767,8 @@ def doc_upload(file: UploadFile = File(...), rule_id: str = Form(default="")):
         doc.update(status="approved", approved_at=_now(), approved_by="auto")
     else:
         doc["status"] = "pending_review"
-    _notify_doc(doc)
     db_put("docs", doc["id"], doc)
+    _notify_doc(doc)
     return _doc_public(doc, detail=True)
 
 
@@ -1795,9 +1839,9 @@ def notify_test(body: dict = Body(default={})):
         people = [r for r in people if r["rid"] == body["rid"]]
     if not (token and people):
         raise err(400, "notify_incomplete", "Enter the LINE channel token and add a receiver")
-    ok, failed = _push_all(token, people, str(body.get("text") or "1n9 OCR"))
+    ok, failed, status = _push_all(token, people, str(body.get("text") or "1n9 OCR"))
     if not ok:
-        raise err(502, "notify_failed", "LINE did not accept the message")
+        raise _notify_error(status)
     return {"ok": True, "sent": ok, "failed": failed}
 
 

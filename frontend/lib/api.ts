@@ -166,3 +166,5 @@ export const login = (username: string, password: string) =>
 export const logout = () => request<{ ok: true }>("/api/auth/logout", { method: "POST" });
 export const setupPassword = (password: string) =>
   request<SetupStatus>("/api/admin/setup/password", { method: "POST", body: JSON.stringify({ password }) });
+
+export const getLicenseKey = () => request<{ license_key: string }>("/api/admin/license/key");

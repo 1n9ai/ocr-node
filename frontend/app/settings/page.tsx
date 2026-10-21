@@ -46,6 +46,7 @@ import {
   updateModel,
   updateProvider,
 } from "@/lib/api";
+import { LicenseKeyReveal } from "@/components/LicenseKeyReveal";
 import { useI18n } from "@/lib/i18n";
 import type {
   AdminStatus,
@@ -1006,6 +1007,7 @@ export default function SettingsPage() {
               onEdit={() => setEditingInfra("central")}
             />
           </div>
+          <LicenseKeyReveal />
         </Panel>
       </div>
 
