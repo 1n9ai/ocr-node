@@ -1,0 +1,17 @@
+services:
+  ocr:
+    build: .
+    image: 1n9-ocr:latest
+    container_name: 1n9-ocr
+    # CENTRAL_URL + LICENSE_KEY + NODE_PASSWORD (+ default model values if you want them)
+    env_file: .env
+    ports:
+      # Only this machine by default. To let other machines in, set NODE_BIND=0.0.0.0 (and set NODE_PASSWORD).
+      - "${NODE_BIND:-127.0.0.1}:${OCR_PORT:-8083}:8080"
+    volumes:
+      # node.db (settings, rules, results) survives rebuilds and restarts
+      - ocr-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  ocr-data:

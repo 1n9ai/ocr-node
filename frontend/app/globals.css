@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  height: 100%;
+}
+
+/* พื้นหลังซ้อนชั้น: เทาอุ่นไล่เฉด + แสงชมพูจาง ๆ มุมขวาบน + เงาเทามุมซ้ายล่าง */
+body {
+  @apply text-accent-900 antialiased;
+  background-color: #f5f1ef;
+  background-image:
+    radial-gradient(1100px 560px at 88% -12%, rgb(227 98 127 / 0.09), transparent 62%),
+    radial-gradient(900px 520px at -8% 108%, rgb(123 110 105 / 0.12), transparent 60%),
+    linear-gradient(180deg, #faf8f7 0%, #f0ebe8 100%);
+  background-attachment: fixed;
+}
+
+::selection {
+  @apply bg-brand-200 text-brand-900;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-accent-300;
+}
+
+/* ช่องกรอกมาตรฐานของทั้งระบบ */
+.field {
+  @apply w-full rounded-lg border border-accent-200 bg-white px-3 py-2 text-sm text-accent-900 placeholder:text-accent-400 focus:border-brand-400 focus:outline-none focus:ring-4 focus:ring-brand-400/15 disabled:bg-accent-50 disabled:text-accent-400;
+}
+/* ป้ายหัวข้อตัวห่างแบบ "PREMIUM PRODUCT" */
+.eyebrow {
+  @apply text-[10.5px] font-semibold uppercase tracking-[0.32em] text-accent-400;
+}
+/* แผงลอยมาตรฐาน */
+.surface {
+  @apply rounded-2xl bg-white bg-sheen shadow-float ring-1 ring-accent-200/60;
+}
+/* หัวเรื่องไล่จากดำหมึกไปแดงไวน์ */
+.title-grad {
+  @apply bg-gradient-to-r from-ink via-accent-800 to-brand-800 bg-clip-text text-transparent;
+}
+.field-label {
+  @apply mb-1 block text-xs font-medium text-accent-600;
+}
